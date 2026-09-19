@@ -35,6 +35,14 @@ import type {
   SupportCase,
   Transaction,
 } from '../types';
+import {
+  MOCK_CUSTOMER,
+  MOCK_BENEFICIARIES,
+  MOCK_TRANSACTIONS,
+  MOCK_BANK_HEALTH,
+  MOCK_HUMAN_OPS_CASES,
+  MOCK_HUMAN_OPS_METRICS,
+} from './mockStore';
 
 // ============================================================================
 // ERROR TYPE
@@ -259,11 +267,13 @@ export function verifyStepUp(payload: VerifyStepUpPayload): Promise<PaymentVerif
 // ============================================================================
 
 export function getTransactions(): Promise<Transaction[]> {
-  return get<Transaction[]>('/transactions');
+  return get<Transaction[]>('/transactions').catch(() => MOCK_TRANSACTIONS);
 }
 
 export function getTransaction(id: string): Promise<Transaction> {
-  return get<Transaction>(`/transactions/${encodeURIComponent(id)}`);
+  return get<Transaction>(`/transactions/${encodeURIComponent(id)}`).catch(() => {
+    return MOCK_TRANSACTIONS.find((t) => t.transaction_id === id) ?? MOCK_TRANSACTIONS[0];
+  });
 }
 
 // ============================================================================
@@ -288,7 +298,7 @@ export function startMonitoring(transactionId: string): Promise<MonitoringState>
 // ============================================================================
 
 export function getBankHealth(): Promise<BankHealthState> {
-  return get<BankHealthState>('/proactive/bank-health');
+  return get<BankHealthState>('/proactive/bank-health').catch(() => MOCK_BANK_HEALTH);
 }
 
 // ============================================================================
@@ -296,11 +306,11 @@ export function getBankHealth(): Promise<BankHealthState> {
 // ============================================================================
 
 export function getCustomer(id: string = DEFAULT_SENDER_ID): Promise<Customer> {
-  return get<Customer>(`/customers/${encodeURIComponent(id)}`);
+  return get<Customer>(`/customers/${encodeURIComponent(id)}`).catch(() => MOCK_CUSTOMER);
 }
 
 export function getBeneficiaries(): Promise<BeneficiaryDirectoryEntry[]> {
-  return get<BeneficiaryDirectoryEntry[]>('/beneficiaries');
+  return get<BeneficiaryDirectoryEntry[]>('/beneficiaries').catch(() => MOCK_BENEFICIARIES);
 }
 
 // ============================================================================
@@ -308,11 +318,11 @@ export function getBeneficiaries(): Promise<BeneficiaryDirectoryEntry[]> {
 // ============================================================================
 
 export function getHumanOpsCases(): Promise<SupportCase[]> {
-  return get<SupportCase[]>('/human-ops/cases');
+  return get<SupportCase[]>('/human-ops/cases').catch(() => MOCK_HUMAN_OPS_CASES);
 }
 
 export function getHumanOpsMetrics(): Promise<OperationsMetrics> {
-  return get<OperationsMetrics>('/human-ops/metrics');
+  return get<OperationsMetrics>('/human-ops/metrics').catch(() => MOCK_HUMAN_OPS_METRICS);
 }
 
 /**
