@@ -121,19 +121,23 @@ function post<T>(path: string, body: unknown): Promise<T> {
 // SCENARIO / DEMO CONTROL
 // ============================================================================
 
+let activeArmedScenario: ScenarioId | null = null;
+
 export function triggerScenario(scenarioId: ScenarioId): Promise<ScenarioTriggerResult> {
+  activeArmedScenario = scenarioId;
   return post<ScenarioTriggerResult>('/scenarios/trigger', { scenario_id: scenarioId }).catch(() => {
     return {
       scenario_id: scenarioId,
       demo_transaction_id: MOCK_TRANSACTIONS[0].transaction_id,
       mutated_fields: {},
-      message: `Scenario '${scenarioId}' armed successfully in prototype mode.`,
+      message: `Scenario '${scenarioId}' armed successfully in prototype mode. Go to Send Money and make a payment to test!`,
       triggered_at: new Date().toISOString(),
     };
   });
 }
 
 export function resetScenario(): Promise<ScenarioResetResult> {
+  activeArmedScenario = null;
   return post<ScenarioResetResult>('/scenarios/reset', {}).catch(() => {
     return {
       scenario_id: 'RESET_SCENARIO',
@@ -260,6 +264,76 @@ export function initiatePayment(payload: InitiatePaymentPayload): Promise<Paymen
     raw_user_text: payload.note,
     idempotency_key: payload.idempotency_key,
   }).catch(() => {
+    const currentScenario = activeArmedScenario;
+    activeArmedScenario = null; // consume once
+
+    let paymentStatus: import('../types').PaymentStatus = 'SUCCESS';
+    let bankStatus: import('../types').BankStatus = 'DEBITED';
+    let upiStatus: import('../types').UpiStatus = 'SUCCESS';
+    let receiverStatus: import('../types').ReceiverStatus = 'CREDITED';
+    let refundStatus: import('../types').RefundStatus = 'NOT_INITIATED';
+
+    if (currentScenario === 'NETWORK_FAILURE') {
+      paymentStatus = 'FAILED';
+      bankStatus = 'DEBITED';
+      upiStatus = 'TIMEOUT';
+      receiverStatus = 'NOT_RECEIVED';
+    } else if (currentScenario === 'DEBIT_NO_CREDIT') {
+      paymentStatus = 'FAILED';
+      bankStatus = 'DEBITED';
+      upiStatus = 'FAILED';
+      receiverStatus = 'NOT_RECEIVED';
+    } else if (currentScenario === 'PENDING_TIMEOUT') {
+      paymentStatus = 'PENDING';
+      bankStatus = 'DEBITED';
+      upiStatus = 'PENDING';
+      receiverStatus = 'UNKNOWN';
+    } else if (currentScenario === 'HIGH_RISK_BLOCK' || payload.amount >= 300000) {
+      paymentStatus = 'BLOCKED';
+      bankStatus = 'NOT_DEBITED';
+      upiStatus = 'FAILED';
+      receiverStatus = 'NOT_RECEIVED';
+    } else if (currentScenario === 'NEW_BENEFICIARY_HIGH_VALUE' || payload.amount >= 150000) {
+      const pendingTxn: Transaction = {
+        transaction_id: `TXN_${Math.floor(10000 + Math.random() * 90000)}`,
+        sender_id: DEFAULT_SENDER_ID,
+        receiver_id: payload.receiver_id,
+        amount: payload.amount,
+        currency: 'INR',
+        timestamp: new Date().toISOString(),
+        payment_status: 'FAILED',
+        bank_status: 'NOT_DEBITED',
+        upi_status: 'FAILED',
+        receiver_status: 'NOT_RECEIVED',
+        refund_status: 'NOT_INITIATED',
+        device_id: DEFAULT_DEVICE_ID,
+        idempotency_key: payload.idempotency_key,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      return {
+        status: 'STEP_UP_REQUIRED',
+        transaction: pendingTxn,
+        risk: {
+          transaction_id: pendingTxn.transaction_id,
+          risk_score: 68,
+          risk_level: 'HIGH',
+          signals: [{ name: 'NEW_BENEFICIARY', label: 'New Beneficiary', severity: 'HIGH', score_contribution: 40, detail: 'High value payment to new contact' }],
+          requires_step_up_verification: true,
+          requires_human_review: false,
+          evaluated_at: new Date().toISOString(),
+        },
+        gate_decision: {
+          action_id: `ACT_${Date.now()}`,
+          result: 'REQUIRE_STEP_UP',
+          reason: 'High value payment requires 2FA Step-up OTP',
+          policy_rules_applied: ['RULE_STEP_UP_HIGH_VALUE'],
+          decided_at: new Date().toISOString(),
+        },
+        operation_id: `OP_${Date.now()}`,
+      };
+    }
+
     const newTxn: Transaction = {
       transaction_id: `TXN_${Math.floor(10000 + Math.random() * 90000)}`,
       sender_id: DEFAULT_SENDER_ID,
@@ -267,23 +341,27 @@ export function initiatePayment(payload: InitiatePaymentPayload): Promise<Paymen
       amount: payload.amount,
       currency: 'INR',
       timestamp: new Date().toISOString(),
-      payment_status: 'SUCCESS',
-      bank_status: 'DEBITED',
-      upi_status: 'SUCCESS',
-      receiver_status: 'CREDITED',
-      refund_status: 'NOT_INITIATED',
+      payment_status: paymentStatus,
+      bank_status: bankStatus,
+      upi_status: upiStatus,
+      receiver_status: receiverStatus,
+      refund_status: refundStatus,
       device_id: DEFAULT_DEVICE_ID,
       idempotency_key: payload.idempotency_key,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
+
+    // Prepend to transaction list
+    MOCK_TRANSACTIONS.unshift(newTxn);
+
     return {
-      status: 'EXECUTED',
+      status: paymentStatus === 'BLOCKED' ? 'BLOCKED' : 'EXECUTED',
       transaction: newTxn,
       risk: {
         transaction_id: newTxn.transaction_id,
-        risk_score: 5,
-        risk_level: 'LOW',
+        risk_score: paymentStatus === 'BLOCKED' ? 85 : 5,
+        risk_level: paymentStatus === 'BLOCKED' ? 'CRITICAL' : 'LOW',
         signals: [],
         requires_step_up_verification: false,
         requires_human_review: false,
@@ -291,8 +369,8 @@ export function initiatePayment(payload: InitiatePaymentPayload): Promise<Paymen
       },
       gate_decision: {
         action_id: `ACT_${Date.now()}`,
-        result: 'ALLOW',
-        reason: 'Client-side fallback payment executed',
+        result: paymentStatus === 'BLOCKED' ? 'BLOCK' : 'ALLOW',
+        reason: paymentStatus === 'BLOCKED' ? 'Blocked by High-Risk Policy' : 'Payment executed',
         policy_rules_applied: [],
         decided_at: new Date().toISOString(),
       },
