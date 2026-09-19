@@ -160,12 +160,78 @@ export function investigateTransaction(
     transaction_id: transactionId || undefined,
   }).catch(() => {
     const targetTxn = MOCK_TRANSACTIONS.find((t) => t.transaction_id === transactionId) ?? MOCK_TRANSACTIONS[0];
+    const isFraud = targetTxn.payment_status === 'BLOCKED' || targetTxn.policy_block_reason === 'HARD_FRAUD_BLOCKED' || (complaint && complaint.toLowerCase().includes('fraud'));
+
+    if (isFraud) {
+      const caseId = `SUP-${Math.floor(10000 + Math.random() * 90000)}`;
+      const supportCase: SupportCase = {
+        case_id: caseId,
+        transaction_id: targetTxn.transaction_id,
+        customer_id: 'USR_SELF',
+        reason: 'Hard Fraud Signal Detected — Blocked by Policy & Escalated to Human Ops',
+        priority: 'CRITICAL',
+        status: 'ESCALATED',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        investigation_timeline: [],
+        evidence: { risk_score: 95, signal: 'HARD_FRAUD_BLOCKED' },
+        diagnosis: 'POLICY_BLOCKED',
+        actions_taken: ['BLOCK_ACTION', 'ESCALATE_TO_HUMAN'],
+        recommended_action: 'ESCALATE_TO_HUMAN',
+        customer_instruction: 'Case escalated to Human Ops Center for manual review.',
+      };
+
+      MOCK_HUMAN_OPS_CASES.unshift(supportCase);
+
+      return {
+        transaction_id: targetTxn.transaction_id,
+        diagnosis: 'ESCALATED_TO_CUSTOMER_CARE',
+        confidence: 0.99,
+        narrative: `Security Alert for transaction ${targetTxn.transaction_id}: This payment was flagged for high fraud risk and automatically blocked by safety policy.`,
+        resolution_narrative: `I have escalated this case to our Human Operations Center (Case #${caseId}) for immediate manual investigation. A specialist is reviewing it now.`,
+        tool_calls: [],
+        recommended_action: 'ESCALATE_TO_HUMAN',
+        care_escalation: {
+          ticket_id: caseId,
+          category: 'FRAUD_SCAM_PHISHING',
+          reason: 'Hard Fraud Policy Block Triggered',
+          priority: 'URGENT',
+          phone_display: '+91 1800-PAYTM-SAFE',
+          phone_tel_href: 'tel:+9118007298672',
+          status: 'OPEN',
+          created_at: new Date().toISOString(),
+        },
+        audit_trail: [],
+        decision: null,
+        risk: {
+          transaction_id: targetTxn.transaction_id,
+          risk_score: 95,
+          risk_level: 'CRITICAL',
+          signals: [{ name: 'RECEIVER_BEHAVIOUR', label: 'Fraud Receiver Signal', severity: 'HIGH', score_contribution: 95, detail: 'High-velocity unverified receiver' }],
+          requires_step_up_verification: false,
+          requires_human_review: true,
+          evaluated_at: new Date().toISOString(),
+        },
+        action_decision: {
+          action_id: `ACT_${Date.now()}`,
+          result: 'BLOCK',
+          reason: 'Hard fraud block applied',
+          policy_rules_applied: ['RULE_HARD_FRAUD_BLOCK'],
+          decided_at: new Date().toISOString(),
+        },
+        support_case: supportCase,
+        final_transaction: targetTxn,
+        used_llm: false,
+        intent_hint: 'HARD_FRAUD_BLOCKED',
+      };
+    }
+
     return {
       transaction_id: targetTxn.transaction_id,
       diagnosis: 'DEBIT_WITHOUT_CREDIT',
       confidence: 0.98,
       narrative: `I investigated transaction ${targetTxn.transaction_id}. Your account was debited ₹${targetTxn.amount}, but the beneficiary bank timed out before acknowledging receipt.`,
-      resolution_narrative: 'I have initiated an automated refund request to return the debited funds within 2 hours.',
+      resolution_narrative: 'Automated instant refund request initiated — debited funds will be credited back to your account immediately (typically under 2 minutes).',
       tool_calls: [],
       recommended_action: 'INITIATE_REFUND',
       care_escalation: null,
