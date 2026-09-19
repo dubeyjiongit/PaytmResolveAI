@@ -1,4 +1,8 @@
 {
-  "framework": "vite",
-  "root": "frontend"
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
 }
